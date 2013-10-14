@@ -15,8 +15,10 @@
 # this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+import argparse
+import yaml
 from SOAPpy import WSDL
-from mk_livestatus import Query, NagiosSocket
+from mk_livestatus import NagiosSocket
 from ConfigParser import RawConfigParser
 
 
@@ -26,29 +28,28 @@ class Config(RawConfigParser):
         self.read(filename)
 
         self.nagios_host = self.get('Nagios', 'host')
-        self.nagios_port = self.get('Nagios', 'port')
+        self.nagios_port = int(self.get('Nagios', 'port'))
+
         self.mantis_wsdl = self.get('Mantis', 'wsdl')
         self.mantis_username = self.get('Mantis', 'username')
         self.mantis_password = self.get('Mantis', 'password')
+        self.mantis_category = self.get('Mantis', 'category')
+        self.mantis_project_id = self.get('Mantis', 'project_id')
 
-    @property
-    def nagios(self):
-        return NagiosSocket(self.nagios_host, self.nagios_port)
-    
-    @property
-    def mantis(self):
-        return WSDL(self.mantis_wsdl)
+        self.template_summary = self.get('Templates', 'summary')
+        self.template_description = self.get('Templates', 'description')
+        self.template_note = self.get('Templates', 'note')
 
 
 class SecurityUpdatesChecker(object):
-    def __init__(self, nagios, mantis):
-        self.nagios = nagios
-        self.mantis = mantis
+    def __init__(self, config):
+        self.config = config
+        self.nagios = NagiosSocket(config.nagios_host, config.nagios_port)
+        self.mantis = WSDL.Proxy(config.mantis_wsdl)
 
     def _nagios_request(self):
         request = self.nagios.services
-        request.columns('host_name', 'service_description', 'plugin_output',
-                        'state')
+        request.columns('host_name', 'plugin_output', 'host_notes')
         request.filter('service_description = security')
         return request
 
@@ -62,49 +63,93 @@ class SecurityUpdatesChecker(object):
         request.filter('state = 0')
         return request.call()
 
-    def check(self):
-        self.check_errors()
-        self.check_ok()
-
     def check_errors(self):
         nagios_errors = self._nagios_errors()
         for line in nagios_errors:
-            mantis_ticket = self.find_ticket(line)
-            if mantis_ticket:
-                self.mantis_add_note(line)
-            else:
-                self.mantis_add_ticket(line)
+            self.check_error(line)
 
-    def check_ok(self):
+    def check_error(self, line):
+        line['packages'] = line['plugin_output'].split(': ')[1]
+        mantis_issue = self.find_issue(line)
+        if mantis_issue:
+            self.mantis_add_note(mantis_issue, line)
+        else:
+            self.mantis_add_issue(line)
+
+    def check_okays(self):
         nagios_ok = self._nagios_ok()
         for line in nagios_ok:
-            mantis_ticket = self.find_ticket(line)
-            if mantis_ticket:  # is open
-                self.mantis_close_ticket(line)
+            self.check_okay(line)
 
-    def find_ticket(self, line):
-        pass
+    def check_okay(self, line):
+        mantis_issue_id = self.find_issue(line)
+        if mantis_issue_id:  # is open
+            self.mantis_close_issue(mantis_issue_id, line)
 
-    def mantis_add_note(self, line):
-        pass
+    def find_issue(self, line):
+        issue_id = self.mantis.mc_issue_get_id_from_summary(
+            self.config.mantis_username,
+            self.config.mantis_password,
+            self.config.template_summary % line
+        )
+        return self.mantis.mc_issue_get(
+            self.config.mantis_username,
+            self.config.mantis_password,
+            issue_id
+        )
 
-    def mantis_add_ticket(self, line):
-        pass
+    def mantis_add_note(self, mantis_issue, line):
+        self.mantis.mc_issue_note_add(
+            self.config.mantis_username,
+            self.config.mantis_password,
+            mantis_issue_id,
+            {'text': self.config.template_note % line}
+        )
 
-    def mantis_close_ticket(self, line):
-        pass
+    def mantis_add_issue(self, line):
+        if 'host_notes' in line and line['host_notes']:
+            host_notes = yaml.load(line['host_notes'])
+            project_id = host_notes['mantis_project_id']
+        else:
+            project_id = self.config.mantis_project_id
+        issue = {
+            'summary': self.config.template_summary % line,
+            'description': self.config.template_description % line,
+            'category': self.config.mantis_category,
+            'project': {'id': project_id}
+        }
+        self.mantis.mc_issue_add(
+            self.config.mantis_username,
+            self.config.mantis_password,
+            issue
+        )
+
+    def mantis_close_issue(self, issue_id, line):
+        issue = {
+            'status': 'resolved'
+        }
+        self.mantis.mc_issue_update(
+            self.config.mantis_username,
+            self.config.mantis_password,
+            issue_id,
+            issue
+        )
 
 
-def main():
-    parser = argparse.ArgumentParser(description='Sends Nagios security update alerts to Mantis')
-    parser.add_argument('-c', '--configuration-file', help='INI file containing configuration', default='/etc/n2m_security.ini')
+def main():  # pragma: nocover
+    parser = argparse.ArgumentParser(description='Sends Nagios security '
+                                     'update alerts to Mantis')
+    parser.add_argument('-c', '--configuration-file',
+                        help='INI file containing configuration',
+                        default='/etc/n2m_security.ini')
     args = parser.parse_args()
-    
+
     config = Config(args.configuration_file)
     checker = SecurityUpdatesChecker(config.nagios, config.mantis)
 
-    checker.check()
+    checker.check_errors()
+    checker.chek_okays()
 
 
-if __name__ == '__main__':
+if __name__ == '__main__':  # pragma: nocover
     main()
