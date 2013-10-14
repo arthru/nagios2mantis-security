@@ -15,12 +15,35 @@
 # this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+from SOAPpy import WSDL
 from mk_livestatus import Query, NagiosSocket
+from ConfigParser import RawConfigParser
+
+
+class Config(RawConfigParser):
+    def __init__(self, filename):
+        RawConfigParser.__init__(self)
+        self.read(filename)
+
+        self.nagios_host = self.get('Nagios', 'host')
+        self.nagios_port = self.get('Nagios', 'port')
+        self.mantis_wsdl = self.get('Mantis', 'wsdl')
+        self.mantis_username = self.get('Mantis', 'username')
+        self.mantis_password = self.get('Mantis', 'password')
+
+    @property
+    def nagios(self):
+        return NagiosSocket(self.nagios_host, self.nagios_port)
+    
+    @property
+    def mantis(self):
+        return WSDL(self.mantis_wsdl)
 
 
 class SecurityUpdatesChecker(object):
-    def __init__(self):
-        self.nagios = NagiosSocket('192.168.222.5', 6557)
+    def __init__(self, nagios, mantis):
+        self.nagios = nagios
+        self.mantis = mantis
 
     def _nagios_request(self):
         request = self.nagios.services
@@ -70,3 +93,18 @@ class SecurityUpdatesChecker(object):
 
     def mantis_close_ticket(self, line):
         pass
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Sends Nagios security update alerts to Mantis')
+    parser.add_argument('-c', '--configuration-file', help='INI file containing configuration', default='/etc/n2m_security.ini')
+    args = parser.parse_args()
+    
+    config = Config(args.configuration_file)
+    checker = SecurityUpdatesChecker(config.nagios, config.mantis)
+
+    checker.check()
+
+
+if __name__ == '__main__':
+    main()
