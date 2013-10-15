@@ -35,7 +35,7 @@ class Config(RawConfigParser):
         self.mantis_username = self.get('Mantis', 'username')
         self.mantis_password = self.get('Mantis', 'password')
         self.mantis_category = self.get('Mantis', 'category')
-        self.mantis_project_id = self.get('Mantis', 'project_id')
+        self.mantis_project_id = int(self.get('Mantis', 'project_id'))
         self.mantis_status_id = int(self.get('Mantis', 'resolved_status_id'))
 
         self.template_summary = self.get('Templates', 'summary')
@@ -139,12 +139,14 @@ class SecurityUpdatesChecker(object):
             }}
         )
 
-    def mantis_add_issue(self, line):
+    def get_nagios_project_id(self, line):
         if 'host_notes' in line and line['host_notes']:
             host_notes = yaml.load(line['host_notes'])
-            project_id = host_notes['mantis_project_id']
-        else:
-            project_id = self.config.mantis_project_id
+            return host_notes['mantis_project_id']
+        return self.config.mantis_project_id
+
+    def mantis_add_issue(self, line):
+        project_id = self.get_nagios_project_id(line)
         issue = {
             'summary': self.config.template_summary % line,
             'description': self.config.template_description % line,
@@ -157,7 +159,7 @@ class SecurityUpdatesChecker(object):
             issue
         )
 
-    def mantis_close_issue(self, mantis_issue, line):
+    def mantis_close_issue(self, mantis_issue):
         self.mantis.mc_issue_note_add(
             self.config.mantis_username,
             self.config.mantis_password,
@@ -167,7 +169,7 @@ class SecurityUpdatesChecker(object):
 
         issue = {}
         for key in ['category', 'project', 'summary', 'description']:
-            if hasattr(mantis_issue[key], '_asdict'):
+            if hasattr(mantis_issue[key], '_asdict'):  # pragma: nocover
                 issue[key] = mantis_issue[key]._asdict()
             else:
                 issue[key] = mantis_issue[key]
