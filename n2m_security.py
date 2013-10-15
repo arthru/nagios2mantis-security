@@ -20,6 +20,7 @@ import yaml
 from SOAPpy import WSDL
 from mk_livestatus import NagiosSocket
 from ConfigParser import RawConfigParser
+from parse import parse
 
 
 class Config(RawConfigParser):
@@ -35,10 +36,12 @@ class Config(RawConfigParser):
         self.mantis_password = self.get('Mantis', 'password')
         self.mantis_category = self.get('Mantis', 'category')
         self.mantis_project_id = self.get('Mantis', 'project_id')
+        self.mantis_status_id = int(self.get('Mantis', 'resolved_status_id'))
 
         self.template_summary = self.get('Templates', 'summary')
         self.template_description = self.get('Templates', 'description')
         self.template_note = self.get('Templates', 'note')
+        self.template_close = self.get('Templates', 'close')
 
 
 class SecurityUpdatesChecker(object):
@@ -71,7 +74,8 @@ class SecurityUpdatesChecker(object):
     def check_error(self, line):
         line['packages'] = line['plugin_output'].split(': ')[1]
         mantis_issue = self.find_issue(line)
-        if mantis_issue:
+        if (mantis_issue and
+                mantis_issue['status']['id'] != self.config.mantis_status_id):
             self.mantis_add_note(mantis_issue, line)
         else:
             self.mantis_add_issue(line)
@@ -82,9 +86,10 @@ class SecurityUpdatesChecker(object):
             self.check_okay(line)
 
     def check_okay(self, line):
-        mantis_issue_id = self.find_issue(line)
-        if mantis_issue_id:  # is open
-            self.mantis_close_issue(mantis_issue_id, line)
+        mantis_issue = self.find_issue(line)
+        if (mantis_issue and
+                mantis_issue['status']['id'] != self.config.mantis_status_id):
+            self.mantis_close_issue(mantis_issue, line)
 
     def find_issue(self, line):
         issue_id = self.mantis.mc_issue_get_id_from_summary(
@@ -92,18 +97,46 @@ class SecurityUpdatesChecker(object):
             self.config.mantis_password,
             self.config.template_summary % line
         )
+        if not issue_id:
+            return None
         return self.mantis.mc_issue_get(
             self.config.mantis_username,
             self.config.mantis_password,
             issue_id
         )
 
+    def find_new_packages(self, mantis_issue, current_packages):
+        template_clean = lambda s: s.replace('%(', '{').replace(')s', '}')
+        packages = set()
+        parsed_desc = parse(
+            template_clean(self.config.template_description),
+            mantis_issue['description']
+        )
+        packages.update(parsed_desc['packages'].split(' '))
+        if mantis_issue['notes']:
+            for note in mantis_issue['notes']:
+                parsed_note = parse(
+                    template_clean(self.config.template_note),
+                    note['text']
+                )
+                packages.update(parsed_note['packages'].split(' '))
+        new_packages = []
+        for package in current_packages.split(' '):
+            if package not in packages:
+                new_packages.append(package)
+        return new_packages
+
     def mantis_add_note(self, mantis_issue, line):
+        new_packages = self.find_new_packages(mantis_issue, line['packages'])
+        if not new_packages:
+            return
         self.mantis.mc_issue_note_add(
             self.config.mantis_username,
             self.config.mantis_password,
-            mantis_issue_id,
-            {'text': self.config.template_note % line}
+            mantis_issue['id'],
+            {'text': self.config.template_note % {
+                'packages': ' '.join(new_packages)
+            }}
         )
 
     def mantis_add_issue(self, line):
@@ -124,14 +157,25 @@ class SecurityUpdatesChecker(object):
             issue
         )
 
-    def mantis_close_issue(self, issue_id, line):
-        issue = {
-            'status': 'resolved'
-        }
+    def mantis_close_issue(self, mantis_issue, line):
+        self.mantis.mc_issue_note_add(
+            self.config.mantis_username,
+            self.config.mantis_password,
+            mantis_issue['id'],
+            {'text': self.config.template_close}
+        )
+
+        issue = {}
+        for key in ['category', 'project', 'summary', 'description']:
+            if hasattr(mantis_issue[key], '_asdict'):
+                issue[key] = mantis_issue[key]._asdict()
+            else:
+                issue[key] = mantis_issue[key]
+        issue['status'] = {'id': self.config.mantis_status_id}
         self.mantis.mc_issue_update(
             self.config.mantis_username,
             self.config.mantis_password,
-            issue_id,
+            mantis_issue['id'],
             issue
         )
 
