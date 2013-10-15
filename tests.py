@@ -2,7 +2,7 @@ import unittest
 import mock
 from StringIO import StringIO
 
-from n2m_security import SecurityUpdatesChecker, Config
+from nagios2mantis_security import SecurityUpdatesChecker, Config
     
 
 class MantisMock(object):
@@ -22,7 +22,7 @@ class MantisIssueNotFoundMock(MantisMock):
 
 class TestN2MSecurity(unittest.TestCase):
     def setUp(self):
-        self.config = Config('n2m_security.ini')
+        self.config = Config('nagios2mantis_security.ini')
 
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_mantis_add_issue(self):

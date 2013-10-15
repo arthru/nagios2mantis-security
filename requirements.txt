@@ -2,3 +2,5 @@ mock
 SOAPpy
 PyYAML
 parse
+#python-mk-livestatus
+-e git+https://github.com/arthru/python-mk-livestatus.git#egg=mk_livestatus

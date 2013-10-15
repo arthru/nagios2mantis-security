@@ -1,0 +1,23 @@
+Source: nagios2mantis-security
+Section: admin
+Priority: optional
+Maintainer: Arthur Vuillard <arthur@hashbang.fr>
+Uploaders: Arthur Vuillard <arthur@hashbang.fr>
+Build-Depends: debhelper (>= 5),
+    python-all,
+    python-soappy (>= 0.12.5),
+    python-coverage,
+    python-mock
+Standards-Version: 3.9.4
+
+Package: nagios2mantis-security
+Architecture: all
+Depends: python,
+    python-soappy (>= 0.12.5),
+    python-yaml,
+    python-parse,
+    python-mk-livestatus (>=0.2),
+    ${misc:Depends}
+Description: Automatically create Mantis issues when a security update is available.
+ Pulls Nagios services and creates issues, add notes, and resolves issues, if necessary.
+

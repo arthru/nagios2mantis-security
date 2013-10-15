@@ -1,0 +1,18 @@
+This package was debianized by Arthur Vuillard <arthur@hashbang.fr> on
+Tue Oct 15 16:14:14 CEST 2013
+
+It was downloaded from <https://github.com/arthru/nagios2mantis-security>
+
+Upstream Author:
+
+    Arthur Vuillard <arthur@hashbang.fr>
+
+Copyright:
+
+    <Copyright (C) 2013 Arthur Vuillard>
+
+License:
+
+The Debian packaging is (C) 2013, Arthur Vuillard <arthur@hashbang.fr> and
+is licensed under the GPL, see `/usr/share/common-licenses/GPL'.
+

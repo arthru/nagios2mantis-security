@@ -35,7 +35,7 @@ class Config(RawConfigParser):
         self.mantis_username = self.get('Mantis', 'username')
         self.mantis_password = self.get('Mantis', 'password')
         self.mantis_category = self.get('Mantis', 'category')
-        self.mantis_project_id = int(self.get('Mantis', 'project_id'))
+        self.mantis_project_id = int(self.get('Mantis', 'default_project_id'))
         self.mantis_status_id = int(self.get('Mantis', 'resolved_status_id'))
 
         self.template_summary = self.get('Templates', 'summary')
@@ -187,7 +187,7 @@ def main():  # pragma: nocover
                                      'update alerts to Mantis')
     parser.add_argument('-c', '--configuration-file',
                         help='INI file containing configuration',
-                        default='/etc/n2m_security.ini')
+                        default='/etc/nagios2mantis_security.ini')
     args = parser.parse_args()
 
     config = Config(args.configuration_file)
