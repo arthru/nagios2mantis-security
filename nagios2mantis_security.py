@@ -18,7 +18,7 @@
 import argparse
 import yaml
 from SOAPpy import WSDL
-from mk_livestatus import NagiosSocket
+from mk_livestatus import Socket
 from ConfigParser import RawConfigParser
 from parse import parse
 
@@ -47,7 +47,7 @@ class Config(RawConfigParser):
 class SecurityUpdatesChecker(object):
     def __init__(self, config):
         self.config = config
-        self.nagios = NagiosSocket(config.nagios_host, config.nagios_port)
+        self.nagios = Socket((config.nagios_host, config.nagios_port))
         self.mantis = WSDL.Proxy(config.mantis_wsdl)
 
     def _nagios_request(self):
