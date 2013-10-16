@@ -6,6 +6,9 @@ Uploaders: Arthur Vuillard <arthur@hashbang.fr>
 Build-Depends: debhelper (>= 5),
     python-all,
     python-soappy (>= 0.12.5),
+    python-yaml,
+    python-parse,
+    python-mk-livestatus (>=0.2),
     python-coverage,
     python-mock
 Standards-Version: 3.9.4

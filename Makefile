@@ -7,7 +7,7 @@ COVERAGE_PARSE_RATE=$(COVERAGE_REPORT) | tail -n 1 | sed "s/ \+/ /g" | cut -d" "
 LINT_CMD?=flake8-python2
 LINT_FILES=nagios2mantis_security.py tests.py
 
-all: lint tests install
+all: tests install
 
 include autobuild.mk
 
