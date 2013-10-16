@@ -1,9 +1,8 @@
 import unittest
 import mock
-from StringIO import StringIO
 
 from nagios2mantis_security import SecurityUpdatesChecker, Config, DbLink
-    
+
 
 class MantisMock(object):
     def __init__(self, url):
@@ -27,10 +26,11 @@ class TestN2MSecurity(unittest.TestCase):
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_mantis_add_issue(self):
         checker = SecurityUpdatesChecker(self.config)
-        checker.mantis.mc_issue_add.return_value = 23 
+        checker.mantis.mc_issue_add.return_value = 23
         line = {
             'packages': 'python-django python-soappy',
             'host_name': 'localhost',
+            'all_packages': 'python-django python-soappy',
         }
         checker.mantis_add_issue(line)
 
@@ -42,14 +42,21 @@ class TestN2MSecurity(unittest.TestCase):
                 'project': {'id': 1},
                 'description': 'The following packages have security updates '
                                'available : python-django python-soappy',
-                'summary': 'Security updates available for host localhost'
+                'summary': 'Security updates available for host localhost : '
+                           'python-django python-soappy'
             }
         )
 
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_mantis_close_ticket(self):
         checker = SecurityUpdatesChecker(self.config)
-        
+
+        line = {
+            'host_name': 'localhost',
+            'plugin_output': 'OK',
+            'host_notes': '',
+            'all_packages': 'python-django'
+        }
         mantis_issue = {
             'id': 1,
             'category': 'General',
@@ -57,16 +64,19 @@ class TestN2MSecurity(unittest.TestCase):
             'summary': 'This is a summary',
             'description': 'This is a description',
         }
-        checker.mantis_close_issue(mantis_issue)
-        
+        checker.mantis_close_issue(mantis_issue, line)
+
         checker.mantis.mc_issue_note_add.assert_called_once_with(
             'mantis_login',
             'mantis_password',
             1,
-            {'text': 'No more security update for this host.'}
+            {'text': 'No more security update for this host.\n'
+             'The packages that have been updated are : python-django'}
         )
         mantis_issue['status'] = {'id': 80}
         del mantis_issue['id']
+        mantis_issue['summary'] = 'Security updates available for host '\
+                                  'localhost : python-django'
         checker.mantis.mc_issue_update.assert_called_once_with(
             'mantis_login',
             'mantis_password',
@@ -82,7 +92,7 @@ class TestN2MSecurity(unittest.TestCase):
             'host_notes': 'mantis_project_id: 3'
         })
         self.assertEquals(3, project_id)
-        
+
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_get_nagios_project_id_without_notes(self):
         checker = SecurityUpdatesChecker(self.config)
@@ -93,7 +103,8 @@ class TestN2MSecurity(unittest.TestCase):
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_mantis_add_note_no_new_packages(self):
         checker = SecurityUpdatesChecker(self.config)
-        checker.mantis_add_note({
+        checker.mantis_add_note(
+            {
                 'id': 42,
                 'description': 'The following packages have security updates '
                                'available : python-django python-soappy',
@@ -103,17 +114,26 @@ class TestN2MSecurity(unittest.TestCase):
         )
 
         self.assertFalse(checker.mantis.mc_issue_note_add.called)
+        self.assertFalse(checker.mantis.mc_issue_update.called)
 
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_mantis_add_note_new_packages(self):
         checker = SecurityUpdatesChecker(self.config)
-        checker.mantis_add_note({
+        checker.mantis_add_note(
+            {
                 'id': 42,
                 'description': 'The following packages have security updates '
                                'available : python-django',
                 'notes': [],
+                'category': 'Default',
+                'project': {'id': 1},
+                'summary': 'this is a summary',
             },
-            {'packages': 'python-django python-soappy'}
+            {
+                'host_name': 'host',
+                'packages': 'python-django python-soappy',
+                'all_packages': 'python-django python-soappy',
+            }
         )
         checker.mantis.mc_issue_note_add.assert_called_once_with(
             'mantis_login',
@@ -121,6 +141,19 @@ class TestN2MSecurity(unittest.TestCase):
             42,
             {'text': 'This packages also have security updates : '
                      'python-soappy'}
+        )
+        checker.mantis.mc_issue_update.assert_called_once_with(
+            'mantis_login',
+            'mantis_password',
+            42,
+            {
+                'category': 'Default',
+                'project': {'id': 1},
+                'description': 'The following packages have security updates '
+                               'available : python-django',
+                'summary': 'Security updates available for host host : '
+                           'python-django python-soappy python-soappy'
+            }
         )
 
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
@@ -207,7 +240,7 @@ class TestN2MSecurity(unittest.TestCase):
         }
         checker.nagios.call = mock.Mock(return_value=[line1, line2])
         checker.check_error = mock.Mock()
-   
+
         checker.check_errors()
 
         self.assertEquals(2, checker.check_error.call_count)
@@ -229,7 +262,7 @@ class TestN2MSecurity(unittest.TestCase):
         }
         checker.nagios.call = mock.Mock(return_value=[line1, line2])
         checker.check_okay = mock.Mock()
-   
+
         checker.check_okays()
 
         self.assertEquals(2, checker.check_okay.call_count)
@@ -244,15 +277,22 @@ class TestN2MSecurity(unittest.TestCase):
             'plugin_output': 'Packages: python-django',
             'host_notes': '',
         }
-        mantis_issue = {'id': 42, 'status': {'id': 10}}
+        mantis_issue = {
+            'id': 42,
+            'status': {'id': 10},
+            'notes': [],
+            'description': 'The following packages have security updates '
+                           'available : python-django',
+        }
         checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
         checker.mantis_add_note = mock.Mock()
 
         checker.check_error(line1)
 
-        checker.mantis_add_note.assert_called_once_with_args(mantis_issue, line1) 
-        
+        checker.mantis_add_note.assert_called_once_with_args(
+            mantis_issue, line1)
+
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_check_error_add_issue_ticket_resolved(self):
         checker = SecurityUpdatesChecker(self.config)
@@ -261,14 +301,20 @@ class TestN2MSecurity(unittest.TestCase):
             'plugin_output': 'Packages: python-django',
             'host_notes': '',
         }
-        mantis_issue = {'id': 42, 'status': {'id': 80}}
+        mantis_issue = {
+            'id': 42,
+            'status': {'id': 80},
+            'notes': [],
+            'description': 'The following packages have security updates '
+                           'available : python-django',
+        }
         checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
         checker.mantis_add_issue = mock.Mock()
 
         checker.check_error(line1)
 
-        checker.mantis_add_issue.assert_called_once_with_args(line1) 
+        checker.mantis_add_issue.assert_called_once_with_args(line1)
 
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_check_error_add_issue_no_ticket(self):
@@ -282,8 +328,8 @@ class TestN2MSecurity(unittest.TestCase):
 
         checker.check_error(line1)
 
-        checker.mantis_add_issue.assert_called_once_with_args(line1) 
-        
+        checker.mantis_add_issue.assert_called_once_with_args(line1)
+
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_check_okay_close(self):
         checker = SecurityUpdatesChecker(self.config)
@@ -292,15 +338,22 @@ class TestN2MSecurity(unittest.TestCase):
             'plugin_output': 'OK',
             'host_notes': '',
         }
-        mantis_issue = {'id': 42, 'status': {'id': 10}}
+        mantis_issue = {
+            'id': 42,
+            'status': {'id': 10},
+            'notes': [],
+            'description': 'The following packages have security updates '
+                           'available : python-django',
+        }
         checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
-        checker.mantis_close_issue= mock.Mock()
+        checker.mantis_close_issue = mock.Mock()
 
         checker.check_okay(line1)
 
-        checker.mantis_close_issue.assert_called_once_with_args(mantis_issue, line1) 
-        
+        checker.mantis_close_issue.assert_called_once_with_args(
+            mantis_issue, line1)
+
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_check_okay_already_closed(self):
         checker = SecurityUpdatesChecker(self.config)
@@ -309,10 +362,16 @@ class TestN2MSecurity(unittest.TestCase):
             'plugin_output': 'OK',
             'host_notes': '',
         }
-        mantis_issue = {'id': 42, 'status': {'id': 80}}
+        mantis_issue = {
+            'id': 42,
+            'status': {'id': 80},
+            'notes': [],
+            'description': 'The following packages have security updates '
+                           'available : python-django',
+        }
         checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
-        checker.mantis_close_issue= mock.Mock()
+        checker.mantis_close_issue = mock.Mock()
 
         checker.check_okay(line1)
 
@@ -326,7 +385,7 @@ class TestN2MSecurity(unittest.TestCase):
             'plugin_output': 'OK',
             'host_notes': '',
         }
-        checker.mantis_close_issue= mock.Mock()
+        checker.mantis_close_issue = mock.Mock()
 
         checker.check_okay(line1)
 

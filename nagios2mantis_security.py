@@ -118,6 +118,11 @@ class SecurityUpdatesChecker(object):
     def check_error(self, line):
         line['packages'] = line['plugin_output'].split(': ')[1]
         mantis_issue = self.find_issue(line)
+        if mantis_issue:
+            notified_packages = self.find_notified_packages(mantis_issue)
+            line['all_packages'] = ' '.join(notified_packages)
+        else:
+            line['all_packages'] = line['packages']
         if (mantis_issue and
                 mantis_issue['status']['id'] != self.config.mantis_status_id):
             self.mantis_add_note(mantis_issue, line)
@@ -131,6 +136,9 @@ class SecurityUpdatesChecker(object):
 
     def check_okay(self, line):
         mantis_issue = self.find_issue(line)
+        if mantis_issue:
+            notified_packages = self.find_notified_packages(mantis_issue)
+            line['all_packages'] = ' '.join(notified_packages)
         if (mantis_issue and
                 mantis_issue['status']['id'] != self.config.mantis_status_id):
             self.mantis_close_issue(mantis_issue, line)
@@ -145,7 +153,7 @@ class SecurityUpdatesChecker(object):
             issue_id
         )
 
-    def find_new_packages(self, mantis_issue, current_packages):
+    def find_notified_packages(self, mantis_issue):
         template_clean = lambda s: s.replace('%(', '{').replace(')s', '}')
         packages = set()
         parsed_desc = parse(
@@ -160,9 +168,13 @@ class SecurityUpdatesChecker(object):
                     note['text']
                 )
                 packages.update(parsed_note['packages'].split(' '))
+        return packages
+
+    def find_new_packages(self, mantis_issue, current_packages):
+        notified_packages = self.find_notified_packages(mantis_issue)
         new_packages = []
         for package in current_packages.split(' '):
-            if package not in packages:
+            if package not in notified_packages:
                 new_packages.append(package)
         return new_packages
 
@@ -177,6 +189,16 @@ class SecurityUpdatesChecker(object):
             {'text': self.config.template_note % {
                 'packages': ' '.join(new_packages)
             }}
+        )
+
+        line['all_packages'] += ' ' + ' '.join(new_packages)
+        issue = self.get_issue_for_update(mantis_issue)
+        issue['summary'] = self.config.template_summary % line
+        self.mantis.mc_issue_update(
+            self.config.mantis_username,
+            self.config.mantis_password,
+            mantis_issue['id'],
+            issue
         )
 
     def get_nagios_project_id(self, line):
@@ -200,20 +222,16 @@ class SecurityUpdatesChecker(object):
         )
         self.db.add(line['host_name'], issue_id)
 
-    def mantis_close_issue(self, mantis_issue):
+    def mantis_close_issue(self, mantis_issue, line):
         self.mantis.mc_issue_note_add(
             self.config.mantis_username,
             self.config.mantis_password,
             mantis_issue['id'],
-            {'text': self.config.template_close}
+            {'text': self.config.template_close % line}
         )
 
-        issue = {}
-        for key in ['category', 'project', 'summary', 'description']:
-            if hasattr(mantis_issue[key], '_asdict'):  # pragma: nocover
-                issue[key] = mantis_issue[key]._asdict()
-            else:
-                issue[key] = mantis_issue[key]
+        issue = self.get_issue_for_update(mantis_issue)
+        issue['summary'] = self.config.template_summary % line
         issue['status'] = {'id': self.config.mantis_status_id}
         self.mantis.mc_issue_update(
             self.config.mantis_username,
@@ -222,6 +240,15 @@ class SecurityUpdatesChecker(object):
             issue
         )
         self.db.delete(mantis_issue['id'])
+
+    def get_issue_for_update(self, mantis_issue):
+        issue = {}
+        for key in ['category', 'project', 'description', 'summary']:
+            if hasattr(mantis_issue[key], '_asdict'):  # pragma: nocover
+                issue[key] = mantis_issue[key]._asdict()
+            else:
+                issue[key] = mantis_issue[key]
+        return issue
 
 
 def main():  # pragma: nocover
