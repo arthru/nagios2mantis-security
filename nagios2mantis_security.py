@@ -16,6 +16,7 @@
 #
 
 import argparse
+import sqlite3
 import yaml
 from SOAPpy import WSDL
 from mk_livestatus import Socket
@@ -43,12 +44,55 @@ class Config(RawConfigParser):
         self.template_note = self.get('Templates', 'note')
         self.template_close = self.get('Templates', 'close')
 
+        self.sqlite_filename = self.get('DB', 'sqlite_filename')
+
+
+class DbLink(object):
+    def __init__(self, sqlite_filename):
+        self.db = sqlite3.connect(sqlite_filename)
+        self.db.execute(
+            'create table if not exists nagios_mantis_link ('
+            'hostname text, issue_id integer);'
+        )
+
+    def add(self, hostname, issue_id):
+        db_issue_id = self.get_issue_id(hostname)
+        assert db_issue_id is None, 'This hostname already has a ticket (%d)'\
+            % (issue_id)
+        request_params = {'hostname': hostname, 'issue_id': issue_id}
+        self.db.execute('insert into nagios_mantis_link (hostname, issue_id) '
+                        'values (:hostname, :issue_id);', request_params)
+        self.db.commit()
+
+    def delete(self, issue_id):
+        self.db.execute(
+            'delete from nagios_mantis_link where issue_id = :issue_id ;',
+            {'issue_id': issue_id}
+        )
+        self.db.commit()
+
+    def get_issue_id(self, hostname):
+        cursor = self.db.cursor()
+        cursor.execute(
+            'select issue_id from nagios_mantis_link where hostname = '
+            ':hostname;',
+            {'hostname': hostname}
+        )
+        try:
+            rows = cursor.fetchall()
+            if len(rows) == 0:
+                return None
+            return rows[0][0]
+        finally:
+            cursor.close()
+
 
 class SecurityUpdatesChecker(object):
     def __init__(self, config):
         self.config = config
         self.nagios = Socket((config.nagios_host, config.nagios_port))
         self.mantis = WSDL.Proxy(config.mantis_wsdl)
+        self.db = DbLink(config.sqlite_filename)
 
     def _nagios_request(self):
         request = self.nagios.services
@@ -92,11 +136,7 @@ class SecurityUpdatesChecker(object):
             self.mantis_close_issue(mantis_issue, line)
 
     def find_issue(self, line):
-        issue_id = self.mantis.mc_issue_get_id_from_summary(
-            self.config.mantis_username,
-            self.config.mantis_password,
-            self.config.template_summary % line
-        )
+        issue_id = self.db.get_issue_id(line['host_name'])
         if not issue_id:
             return None
         return self.mantis.mc_issue_get(
@@ -153,11 +193,12 @@ class SecurityUpdatesChecker(object):
             'category': self.config.mantis_category,
             'project': {'id': project_id}
         }
-        self.mantis.mc_issue_add(
+        issue_id = self.mantis.mc_issue_add(
             self.config.mantis_username,
             self.config.mantis_password,
             issue
         )
+        self.db.add(line['host_name'], issue_id)
 
     def mantis_close_issue(self, mantis_issue):
         self.mantis.mc_issue_note_add(
@@ -180,6 +221,7 @@ class SecurityUpdatesChecker(object):
             mantis_issue['id'],
             issue
         )
+        self.db.delete(mantis_issue['id'])
 
 
 def main():  # pragma: nocover

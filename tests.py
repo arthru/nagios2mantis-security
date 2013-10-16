@@ -2,12 +2,11 @@ import unittest
 import mock
 from StringIO import StringIO
 
-from nagios2mantis_security import SecurityUpdatesChecker, Config
+from nagios2mantis_security import SecurityUpdatesChecker, Config, DbLink
     
 
 class MantisMock(object):
     def __init__(self, url):
-        self.mc_issue_get_id_from_summary = mock.Mock(return_value=1)
         self.mc_issue_note_add = mock.Mock()
         self.mc_issue_add = mock.Mock()
         self.mc_issue_get = mock.Mock()
@@ -23,11 +22,12 @@ class MantisIssueNotFoundMock(MantisMock):
 class TestN2MSecurity(unittest.TestCase):
     def setUp(self):
         self.config = Config('nagios2mantis_security.ini')
+        self.config.sqlite_filename = ':memory:'
 
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_mantis_add_issue(self):
         checker = SecurityUpdatesChecker(self.config)
-        
+        checker.mantis.mc_issue_add.return_value = 23 
         line = {
             'packages': 'python-django python-soappy',
             'host_name': 'localhost',
@@ -145,30 +145,19 @@ class TestN2MSecurity(unittest.TestCase):
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_find_issue_not_found(self):
         checker = SecurityUpdatesChecker(self.config)
-        checker.mantis.mc_issue_get_id_from_summary.return_value = None
         issue = checker.find_issue({'host_name': 'localhost'})
         self.assertIsNone(issue)
-        
-        checker.mantis.mc_issue_get_id_from_summary.assert_called_once_with(
-            'mantis_login',
-            'mantis_password',
-            'Security updates available for host localhost'
-        )
 
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_find_issue_found(self):
         checker = SecurityUpdatesChecker(self.config)
         mantis_issue = {'id': 42}
-        checker.mantis.mc_issue_get_id_from_summary.return_value = 42
+        checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
-        issue = checker.find_issue({'host_name': 'localhost'})
-        self.assertEquals(issue, mantis_issue)
 
-        checker.mantis.mc_issue_get_id_from_summary.assert_called_once_with(
-            'mantis_login',
-            'mantis_password',
-            'Security updates available for host localhost'
-        )
+        issue = checker.find_issue({'host_name': 'localhost'})
+
+        self.assertEquals(issue, mantis_issue)
         checker.mantis.mc_issue_get.assert_called_once_with(
             'mantis_login',
             'mantis_password',
@@ -256,7 +245,7 @@ class TestN2MSecurity(unittest.TestCase):
             'host_notes': '',
         }
         mantis_issue = {'id': 42, 'status': {'id': 10}}
-        checker.mantis.mc_issue_get_id_from_summary.return_value = 42
+        checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
         checker.mantis_add_note = mock.Mock()
 
@@ -273,7 +262,7 @@ class TestN2MSecurity(unittest.TestCase):
             'host_notes': '',
         }
         mantis_issue = {'id': 42, 'status': {'id': 80}}
-        checker.mantis.mc_issue_get_id_from_summary.return_value = 42
+        checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
         checker.mantis_add_issue = mock.Mock()
 
@@ -289,7 +278,6 @@ class TestN2MSecurity(unittest.TestCase):
             'plugin_output': 'Packages: python-django',
             'host_notes': '',
         }
-        checker.mantis.mc_issue_get_id_from_summary.return_value = None
         checker.mantis_add_issue = mock.Mock()
 
         checker.check_error(line1)
@@ -305,7 +293,7 @@ class TestN2MSecurity(unittest.TestCase):
             'host_notes': '',
         }
         mantis_issue = {'id': 42, 'status': {'id': 10}}
-        checker.mantis.mc_issue_get_id_from_summary.return_value = 42
+        checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
         checker.mantis_close_issue= mock.Mock()
 
@@ -322,7 +310,7 @@ class TestN2MSecurity(unittest.TestCase):
             'host_notes': '',
         }
         mantis_issue = {'id': 42, 'status': {'id': 80}}
-        checker.mantis.mc_issue_get_id_from_summary.return_value = 42
+        checker.db.add('localhost', 42)
         checker.mantis.mc_issue_get.return_value = mantis_issue
         checker.mantis_close_issue= mock.Mock()
 
@@ -338,13 +326,24 @@ class TestN2MSecurity(unittest.TestCase):
             'plugin_output': 'OK',
             'host_notes': '',
         }
-        checker.mantis.mc_issue_get_id_from_summary.return_value = None
         checker.mantis_close_issue= mock.Mock()
 
         checker.check_okay(line1)
 
         self.assertFalse(checker.mantis_close_issue.called)
 
+
+class DbLinkTest(unittest.TestCase):
+    def test_add_twice(self):
+        db = DbLink(':memory:')
+        db.add('localhost', 42)
+        with self.assertRaises(AssertionError):
+            db.add('localhost', 42)
+
+        cursor = db.db.cursor()
+        cursor.execute('select * from nagios_mantis_link;')
+        rows = cursor.fetchall()
+        self.assertEquals(rows, [(u'localhost', 42)])
 
 if __name__ == '__main__':
     unittest.main()
