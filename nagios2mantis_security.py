@@ -260,10 +260,10 @@ def main():  # pragma: nocover
     args = parser.parse_args()
 
     config = Config(args.configuration_file)
-    checker = SecurityUpdatesChecker(config.nagios, config.mantis)
+    checker = SecurityUpdatesChecker(config)
 
     checker.check_errors()
-    checker.chek_okays()
+    checker.check_okays()
 
 
 if __name__ == '__main__':  # pragma: nocover
