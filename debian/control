@@ -10,7 +10,7 @@ Build-Depends: debhelper (>= 5),
     python-parse,
     python-mk-livestatus (>=0.2),
     python-coverage,
-    python-mock
+    python-mock (>=1.0.0)
 Standards-Version: 3.9.4
 
 Package: nagios2mantis-security
