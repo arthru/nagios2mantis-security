@@ -15,10 +15,14 @@
 # this program. If not, see <http://www.gnu.org/licenses/>.
 #
 
+import socket
+import sys
+import logging
 import argparse
 import sqlite3
 import yaml
 from SOAPpy import WSDL
+from SOAPpy import faultType
 from mk_livestatus import Socket
 from ConfigParser import RawConfigParser
 from parse import parse
@@ -90,9 +94,20 @@ class DbLink(object):
 class SecurityUpdatesChecker(object):
     def __init__(self, config):
         self.config = config
-        self.nagios = Socket((config.nagios_host, config.nagios_port))
-        self.mantis = WSDL.Proxy(config.mantis_wsdl)
         self.db = DbLink(config.sqlite_filename)
+
+    @property
+    def mantis(self):
+        if not hasattr(self, '_mantis'):
+            self._mantis = WSDL.Proxy(self.config.mantis_wsdl)
+        return self._mantis
+
+    @property
+    def nagios(self):
+        if not hasattr(self, '_nagios'):
+            self._nagios = Socket((self.config.nagios_host,
+                                   self.config.nagios_port))
+        return self._nagios
 
     def _nagios_request(self):
         request = self.nagios.services
@@ -111,9 +126,20 @@ class SecurityUpdatesChecker(object):
         return request.call()
 
     def check_errors(self):
-        nagios_errors = self._nagios_errors()
+        try:
+            nagios_errors = self._nagios_errors()
+        except socket.error:
+            logging.exception('Cannot connect to Nagios')
+            sys.exit(1)
         for line in nagios_errors:
-            self.check_error(line)
+            try:
+                self.check_error(line)
+            except faultType:
+                logging.exception('An error occured connecting to Mantis '
+                                  'while treating %s', line)
+            except sqlite3.Error:
+                logging.exception('An error occured with sqlite3 database '
+                                  'while treating %s', line)
 
     def check_error(self, line):
         line['packages'] = line['plugin_output'].split(': ')[1]
@@ -130,9 +156,20 @@ class SecurityUpdatesChecker(object):
             self.mantis_add_issue(line)
 
     def check_okays(self):
-        nagios_ok = self._nagios_ok()
+        try:
+            nagios_ok = self._nagios_ok()
+        except socket.error:
+            logging.exception('Cannot connect to Nagios')
+            sys.exit(1)
         for line in nagios_ok:
-            self.check_okay(line)
+            try:
+                self.check_okay(line)
+            except faultType:
+                logging.exception('An error occured connecting to Mantis '
+                                  'while treating %s', line)
+            except sqlite3.Error:
+                logging.exception('An error occured with sqlite3 database '
+                                  'while treating %s', line)
 
     def check_okay(self, line):
         mantis_issue = self.find_issue(line)

@@ -1,7 +1,13 @@
 import unittest
-import mock
+import socket
+import sqlite3
 
-from nagios2mantis_security import SecurityUpdatesChecker, Config, DbLink
+import mock
+from SOAPpy import faultType
+
+from nagios2mantis_security import SecurityUpdatesChecker
+from nagios2mantis_security import Config
+from nagios2mantis_security import DbLink
 
 
 class MantisMock(object):
@@ -247,6 +253,64 @@ class TestN2MSecurity(unittest.TestCase):
         checker.check_error.assert_any_call(line1)
         checker.check_error.assert_any_call(line2)
 
+    def test_check_errors_socket_error(self):
+        checker = SecurityUpdatesChecker(self.config)
+        checker.nagios.call = mock.Mock(side_effect=socket.error)
+
+        with mock.patch('logging.exception') as exc_mock,\
+                self.assertRaises(SystemExit):
+            checker.check_errors()
+
+        exc_mock.assert_called_once_with('Cannot connect to Nagios')
+
+    def test_check_errors_mantis_error(self):
+        checker = SecurityUpdatesChecker(self.config)
+        line1 = {
+            'host_name': 'localhost',
+            'plugin_output': 'Packages: python-django',
+            'host_notes': '',
+        }
+        line2 = {
+            'host_name': 'host2',
+            'plugin_output': 'Packages: python-django',
+            'host_notes': '',
+        }
+        checker.nagios.call = mock.Mock(return_value=[line1, line2])
+        checker.check_error = mock.Mock(side_effect=[None, faultType])
+
+        with mock.patch('logging.exception') as exc_mock:
+            checker.check_errors()
+
+        exc_mock.assert_called_once_with(
+            'An error occured connecting to Mantis while treating %s',
+            {'host_notes': '', 'host_name': 'host2',
+             'plugin_output': 'Packages: python-django'}
+        )
+
+    def test_check_errors_sqlite_error(self):
+        checker = SecurityUpdatesChecker(self.config)
+        line1 = {
+            'host_name': 'localhost',
+            'plugin_output': 'Packages: python-django',
+            'host_notes': '',
+        }
+        line2 = {
+            'host_name': 'host2',
+            'plugin_output': 'Packages: python-django',
+            'host_notes': '',
+        }
+        checker.nagios.call = mock.Mock(return_value=[line1, line2])
+        checker.check_error = mock.Mock(side_effect=[None, sqlite3.Error])
+
+        with mock.patch('logging.exception') as exc_mock:
+            checker.check_errors()
+
+        exc_mock.assert_called_once_with(
+            'An error occured with sqlite3 database while treating %s',
+            {'host_notes': '', 'host_name': 'host2',
+             'plugin_output': 'Packages: python-django'}
+        )
+
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_check_okays(self):
         checker = SecurityUpdatesChecker(self.config)
@@ -268,6 +332,62 @@ class TestN2MSecurity(unittest.TestCase):
         self.assertEquals(2, checker.check_okay.call_count)
         checker.check_okay.assert_any_call(line1)
         checker.check_okay.assert_any_call(line2)
+
+    def test_check_okays_socket_error(self):
+        checker = SecurityUpdatesChecker(self.config)
+        checker.nagios.call = mock.Mock(side_effect=socket.error)
+
+        with mock.patch('logging.exception') as exc_mock,\
+                self.assertRaises(SystemExit):
+            checker.check_okays()
+
+        exc_mock.assert_called_once_with('Cannot connect to Nagios')
+
+    def test_check_okays_mantis_error(self):
+        checker = SecurityUpdatesChecker(self.config)
+        line1 = {
+            'host_name': 'localhost',
+            'plugin_output': 'OK',
+            'host_notes': '',
+        }
+        line2 = {
+            'host_name': 'host2',
+            'plugin_output': 'OK',
+            'host_notes': '',
+        }
+        checker.nagios.call = mock.Mock(return_value=[line1, line2])
+        checker.check_okay = mock.Mock(side_effect=[None, faultType])
+
+        with mock.patch('logging.exception') as exc_mock:
+            checker.check_okays()
+
+        exc_mock.assert_called_once_with(
+            'An error occured connecting to Mantis while treating %s',
+            {'host_notes': '', 'host_name': 'host2', 'plugin_output': 'OK'}
+        )
+
+    def test_check_okays_sqlite_error(self):
+        checker = SecurityUpdatesChecker(self.config)
+        line1 = {
+            'host_name': 'localhost',
+            'plugin_output': 'OK',
+            'host_notes': '',
+        }
+        line2 = {
+            'host_name': 'host2',
+            'plugin_output': 'OK',
+            'host_notes': '',
+        }
+        checker.nagios.call = mock.Mock(return_value=[line1, line2])
+        checker.check_okay = mock.Mock(side_effect=[None, sqlite3.Error])
+
+        with mock.patch('logging.exception') as exc_mock:
+            checker.check_okays()
+
+        exc_mock.assert_called_once_with(
+            'An error occured with sqlite3 database while treating %s',
+            {'host_notes': '', 'host_name': 'host2', 'plugin_output': 'OK'}
+        )
 
     @mock.patch('SOAPpy.WSDL.Proxy', MantisMock)
     def test_check_error_add_note(self):
